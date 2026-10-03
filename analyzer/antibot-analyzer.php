@@ -219,7 +219,7 @@ function analyzerAddToList(string $path, string $value, string $comment): array 
 
         rewind($handle);
         $content = stream_get_contents($handle);
-        $lines = preg_split('/\\R/', (string)$content);
+        $lines = preg_split('/\R/', (string)$content);
 
         foreach ($lines as $line) {
             $lineValue = trim((string)preg_replace('/#.*$/', '', $line));
@@ -323,7 +323,7 @@ function analyzerPerformBlock(string $logFile, string $action, string $ip, strin
  */
 if (!class_exists('AntiBotLogParser')) {
     final class AntiBotLogParser {
-        public static function parse(string $content, ?string $timeFrom = null, ?string $timeTo = null, ?string $searchIP = null): array {
+        public static function parse(string $content, ?string $timeFrom = null, ?string $timeTo = null, ?string $searchTerm = null): array {
             $sessions = [];
 
             foreach (preg_split('/\R/u', $content) as $line) {
@@ -351,10 +351,6 @@ if (!class_exists('AntiBotLogParser')) {
                 if ($timeTo !== null && $timeTo !== '' && $timestamp > $timeTo) {
                     continue;
                 }
-                if ($searchIP !== null && $searchIP !== '' && $ip !== $searchIP) {
-                    continue;
-                }
-
                 $key = $rayId !== '' ? $rayId : ($ip . '|' . $timestamp);
                 if (!isset($sessions[$key])) {
                     $sessions[$key] = [
@@ -471,6 +467,22 @@ if (!class_exists('AntiBotLogParser')) {
             }
             unset($session);
 
+            // Search after grouping so matching fingerprints can find sessions across IPs.
+            if ($searchTerm !== null && $searchTerm !== '') {
+                $needle = strtolower($searchTerm);
+                $sessions = array_filter($sessions, static function (array $session) use ($needle): bool {
+                    if (stripos((string)($session['ip'] ?? ''), $needle) !== false) {
+                        return true;
+                    }
+                    foreach (($session['fingerprints'] ?? []) as $fp) {
+                        if (stripos((string)$fp, $needle) !== false) {
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+            }
+
             return ['sessions' => array_values($sessions)];
         }
     }
@@ -478,7 +490,11 @@ if (!class_exists('AntiBotLogParser')) {
 
 $timeFrom = isset($_GET['from']) ? trim((string)$_GET['from']) : null;
 $timeTo   = isset($_GET['to']) ? trim((string)$_GET['to']) : null;
-$searchIP = isset($_GET['search']) ? trim((string)$_GET['search']) : null;
+$searchTerm = isset($_GET['search']) ? trim((string)$_GET['search']) : null;
+$sortBy = (string)($_GET['sort'] ?? 'captchaShown');
+$sortOrder = (($_GET['order'] ?? 'desc') === 'asc') ? 'asc' : 'desc';
+$allowedSorts = ['captchaShown', 'requests', 'sessions', 'blocked', 'ipCount', 'firstSeen', 'lastSeen'];
+if (!in_array($sortBy, $allowedSorts, true)) $sortBy = 'captchaShown';
 
 $minCaptchaAttempts = max(1, min(20, (int)($_GET['threshold'] ?? 2)));
 
@@ -491,7 +507,7 @@ $data = AntiBotLogParser::parse(
     $logContent,
     $timeFrom ?: null,
     $timeTo ?: null,
-    $searchIP ?: null
+    $searchTerm ?: null
 );
 
 $sessions = array_values($data['sessions'] ?? []);
@@ -733,6 +749,22 @@ usort($alreadyBlocked, fn($a,$b) => ($b['blocked'] <=> $a['blocked']) ?: ($b['la
 usort($captchaPending, fn($a,$b) => ($b['captchaShown'] <=> $a['captchaShown']));
 usort($captchaPassed, fn($a,$b) => ($b['captchaPassed'] <=> $a['captchaPassed']));
 
+$sortEntities = static function (array &$items) use ($sortBy, $sortOrder): void {
+    usort($items, static function (array $a, array $b) use ($sortBy, $sortOrder): int {
+        $av = $a[$sortBy] ?? '';
+        $bv = $b[$sortBy] ?? '';
+        $cmp = (is_numeric($av) && is_numeric($bv))
+            ? ((float)$av <=> (float)$bv)
+            : strcmp((string)$av, (string)$bv);
+        return $sortOrder === 'asc' ? $cmp : -$cmp;
+    });
+};
+$sortEntities($toBlockFp);
+$sortEntities($toBlockIp);
+$sortEntities($alreadyBlocked);
+$sortEntities($captchaPending);
+$sortEntities($captchaPassed);
+
 $allBlockedIPs = [];
 $allBlockedFPs = [];
 foreach ($alreadyBlocked as $item) {
@@ -888,7 +920,7 @@ h1{font-size:28px;margin:0 0 5px}.sub{color:var(--muted);font-size:13px}.grid{di
 .action-result.success{background:#0d3328;color:#a7f3d0;border-color:#166534}.action-result.error{background:#3a1418;color:#fecaca;border-color:#991b1b}
 .action-warning{margin-top:12px;padding:9px;background:#2a2110;color:#fcd34d;border-radius:8px;font-size:11px}
 .empty{padding:35px;text-align:center;color:#64748b;background:var(--panel2);border:1px dashed var(--line);border-radius:12px}
-.filters{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.filters label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px}.filters input{background:#0b1220;border:1px solid var(--line);color:#fff;border-radius:8px;padding:9px}.filters button{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer}
+.filters{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.filters label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px}.filters input,.filters select{background:#0b1220;border:1px solid var(--line);color:#fff;border-radius:8px;padding:9px}.filters button{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer}
 footer{color:#64748b;font-size:11px;text-align:center;padding:10px}
 @media(max-width:1050px){.grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:700px){.wrap{padding:12px}.header{display:block}.grid,.cards{grid-template-columns:1fr}.facts{grid-template-columns:repeat(2,1fr)}h1{font-size:22px}}
 </style>
@@ -912,7 +944,9 @@ footer{color:#64748b;font-size:11px;text-align:center;padding:10px}
 <form class="filters" method="get">
     <label>С даты<input type="text" name="from" placeholder="2026-10-01 00:00:00" value="<?= h($timeFrom) ?>"></label>
     <label>По дату<input type="text" name="to" placeholder="2026-10-03 23:59:59" value="<?= h($timeTo) ?>"></label>
-    <label>IP<input type="text" name="search" placeholder="Поиск IP" value="<?= h($searchIP) ?>"></label>
+    <label>IP или Fingerprint<input type="text" name="search" placeholder="IP или часть fingerprint" value="<?= h($searchTerm) ?>"></label>
+    <label>Сортировать по<select name="sort"><option value="captchaShown" <?= $sortBy==='captchaShown' ? 'selected' : '' ?>>Показам CAPTCHA</option><option value="requests" <?= $sortBy==='requests' ? 'selected' : '' ?>>Запросам</option><option value="sessions" <?= $sortBy==='sessions' ? 'selected' : '' ?>>Сессиям</option><option value="blocked" <?= $sortBy==='blocked' ? 'selected' : '' ?>>Блокировкам</option><option value="ipCount" <?= $sortBy==='ipCount' ? 'selected' : '' ?>>Количеству IP</option><option value="firstSeen" <?= $sortBy==='firstSeen' ? 'selected' : '' ?>>Первому появлению</option><option value="lastSeen" <?= $sortBy==='lastSeen' ? 'selected' : '' ?>>Последнему появлению</option></select></label>
+    <label>Порядок<select name="order"><option value="desc" <?= $sortOrder==='desc' ? 'selected' : '' ?>>По убыванию</option><option value="asc" <?= $sortOrder==='asc' ? 'selected' : '' ?>>По возрастанию</option></select></label>
     <label>Порог CAPTCHA<input type="number" min="1" max="20" name="threshold" value="<?= (int)$minCaptchaAttempts ?>"></label>
     <button type="submit">Обновить</button>
 </form>
