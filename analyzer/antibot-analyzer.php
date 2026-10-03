@@ -219,7 +219,7 @@ function analyzerAddToList(string $path, string $value, string $comment): array 
 
         rewind($handle);
         $content = stream_get_contents($handle);
-        $lines = preg_split('/\\R/', (string)$content);
+        $lines = preg_split('/\R/', (string)$content);
 
         foreach ($lines as $line) {
             $lineValue = trim((string)preg_replace('/#.*$/', '', $line));
@@ -759,10 +759,11 @@ $sortEntities = static function (array &$items) use ($sortBy, $sortOrder): void 
         return $sortOrder === 'asc' ? $cmp : -$cmp;
     });
 };
-foreach ([$toBlockFp, $toBlockIp, $alreadyBlocked, $captchaPending, $captchaPassed] as &$sortList) {
-    $sortEntities($sortList);
-}
-unset($sortList);
+$sortEntities($toBlockFp);
+$sortEntities($toBlockIp);
+$sortEntities($alreadyBlocked);
+$sortEntities($captchaPending);
+$sortEntities($captchaPassed);
 
 $allBlockedIPs = [];
 $allBlockedFPs = [];
